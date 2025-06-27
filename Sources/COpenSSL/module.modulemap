@@ -1,0 +1,4 @@
+module COpenSSL [system] {
+    header "/usr/include/openssl/ssl.h"
+    export *
+}
