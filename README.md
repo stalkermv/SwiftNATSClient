@@ -7,7 +7,7 @@ The Swift NATS Client library provides a modern, idiomatic, async/await-based AP
 To use the `NATS` library in a SwiftPM project, add the following line to the dependencies in your `Package.swift` file:
 
 ```swift
-.package(url: "https://github.com/YOUR_GITHUB_USERNAME/SwiftNATSClient", branch: "main")
+.package(url: "https://github.com/stalkermv/SwiftNATSClient", branch: "main")
 ```
 
 Include `"NATS"` as a dependency for your executable target:
