@@ -6,12 +6,11 @@ import PackageDescription
 let package = Package(
     name: "SwiftNATSClient",
     platforms: [
-        .macOS(.v13), .iOS(.v16), .tvOS(.v16), .watchOS(.v9)
+        .macOS(.v13),// .iOS(.v16), .tvOS(.v16), .watchOS(.v9)
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(name: "NATS", targets: ["NATS"]),
-        .library(name: "NATSFoundationCompat", targets: ["NATSFoundationCompat"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-log", from: "1.1.0"),
@@ -59,7 +58,6 @@ let package = Package(
                 .linkedLibrary("crypto"),
                 .linkedLibrary("z")
             ],
-            
         ),
         // 2. Low-level Swift wrapper
         .target(
@@ -80,12 +78,6 @@ let package = Package(
                 .product(name: "Metrics", package: "swift-metrics")
             ]
         ),
-        // 4. Foundation-friendly convenience
-        .target(
-            name: "NATSFoundationCompat",
-            dependencies: ["NATS"]
-        ),
-        // 5. Tests
         .testTarget(
             name: "NATSTests",
             dependencies: ["NATS"]
