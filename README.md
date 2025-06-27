@@ -1,3 +1,7 @@
+# ⚠️ Disclaimer
+
+**This project is in an early stage of development and is not ready for production use. APIs and behavior may change without notice. Use at your own risk.**
+
 # Swift NATS Client
 
 The Swift NATS Client library provides a modern, idiomatic, async/await-based API for [NATS](https://nats.io) messaging, inspired by swift-kafka-client and leveraging [Swift's concurrency features](https://docs.swift.org/swift-book/LanguageGuide/Concurrency.html). This package wraps the native [CNATS](https://github.com/nats-io/nats.c) C library.
