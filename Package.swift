@@ -52,12 +52,11 @@ let package = Package(
                 .define("NATS_BUILD_STREAMING", to: "OFF"),
                 .define("NATS_DISABLE_LIBUV", to: "ON"),
             ],
-            
             linkerSettings: [
                 .linkedLibrary("ssl"),
                 .linkedLibrary("crypto"),
                 .linkedLibrary("z")
-            ],
+            ]
         ),
         // 2. Low-level Swift wrapper
         .target(
