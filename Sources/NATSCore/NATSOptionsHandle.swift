@@ -6,6 +6,7 @@
 //
 
 import CNATS
+import Foundation
 
 /// Handle for NATS options. Wraps the underlying C pointer and provides methods to set various options.
 public final class NATSOptionsHandle {
@@ -50,5 +51,18 @@ public final class NATSOptionsHandle {
     
     public func setUserCredentialsFile(_ file: String) {
         natsOptions_SetUserCredentialsFromFiles(ptr, file, nil)
+    }
+
+    public func setAllowReconnect(_ allow: Bool) {
+        natsOptions_SetAllowReconnect(ptr, allow)
+    }
+
+    public func setMaxReconnects(_ max: Int) {
+        natsOptions_SetMaxReconnect(ptr, Int32(max))
+    }
+
+    public func setReconnectWait(_ seconds: TimeInterval) {
+        let ms = Int64(seconds * 1000)
+        natsOptions_SetReconnectWait(ptr, ms)
     }
 }
