@@ -44,9 +44,8 @@ public final class NATSClient: Service, @unchecked Sendable {
             opts.setUserInfo(user: user, password: password)
         case .token(let token):
             opts.setToken(token)
-        case .nkey:
-            // NKey підтримується лише через creds-файл (JWT+NKey)
-            break // Для простоти, не підтримуємо окремо seed
+        case .nkey(let seed):
+            opts.setNKey(seed: seed)
         case .jwtCredsFile(let file):
             opts.setUserCredentialsFile(file)
         }
