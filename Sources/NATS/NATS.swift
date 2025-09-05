@@ -32,10 +32,11 @@ public final class NATSClient: Service, @unchecked Sendable {
     private func makeOptions() -> NATSOptionsHandle {
         let opts = NATSOptionsHandle()
         opts.setURL(configuration.url)
-        // Reconnect options
-        // opts.setReconnect(configuration.reconnect)
-        // opts.setMaxReconnects(configuration.maxReconnects)
-        // opts.setReconnectWait(configuration.reconnectWait)
+        if configuration.reconnect {
+            opts.setAllowReconnect(true)
+            opts.setMaxReconnects(configuration.maxReconnects)
+            opts.setReconnectWait(configuration.reconnectWait)
+        }
         // Auth
         switch configuration.auth {
         case .none:
