@@ -105,8 +105,10 @@ struct IntegrationTests {
 
                 await serviceGroup.triggerGracefulShutdown()
                 try await tasks.waitForAll()
-                let state = await client.connectionState
-                #expect(state == .closed)
+                // The graceful shutdown handler closes the connection in a separate task.
+                try await waitFor("finish the NATS client shutdown") {
+                    await client.connectionState == .closed
+                }
             }
         }
     }
