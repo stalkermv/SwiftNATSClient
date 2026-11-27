@@ -134,10 +134,11 @@ public final class NATSClient: Service, @unchecked Sendable {
                 let box = MutableBox(continuation)
                 let unmanaged = Unmanaged.passRetained(box).toOpaque()
                 let handler: NATSMsgHandler = { _, _, msgPtr, closure in
-                    guard let msgPtr = msgPtr, let closure = closure else { return }
+                    guard let msgPtr else { return }
+                    let msg = NATSMsgHandle(takingOwnershipOf: msgPtr)
+                    guard let closure else { return }
                     typealias Box = MutableBox<AsyncStream<NATSMessage>.Continuation>
                     let box = Unmanaged<Box>.fromOpaque(closure).takeUnretainedValue()
-                    let msg = NATSMsgHandle(ptr: msgPtr)
                     if let subject = msg.subject, let data = msg.data {
                         box.value.yield(NATSMessage(subject: subject, data: data, replyTo: nil))
                     }

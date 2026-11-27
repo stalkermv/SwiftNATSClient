@@ -8,10 +8,19 @@
 import CNATS
 import Foundation
 
-/// Handle for a NATS message. Wraps the underlying C pointer and provides accessors.
-public struct NATSMsgHandle {
-    /// Underlying pointer to the C natsMsg object.
-    public let ptr: OpaquePointer
+/// Owns a C NATS message and releases it when the handle is deinitialized.
+public final class NATSMsgHandle {
+    private let ptr: OpaquePointer
+
+    /// Takes ownership of a message delivered by a subscription or returned by a request.
+    public init(takingOwnershipOf ptr: OpaquePointer) {
+        self.ptr = ptr
+    }
+
+    deinit {
+        natsMsg_Destroy(ptr)
+    }
+
     /// The subject of the message.
     public var subject: String? {
         guard let cstr = natsMsg_GetSubject(ptr) else { return nil }
@@ -22,11 +31,5 @@ public struct NATSMsgHandle {
         let len = natsMsg_GetDataLength(ptr)
         guard let base = natsMsg_GetData(ptr) else { return nil }
         return Data(bytes: base, count: Int(len))
-    }
-    /// Destroys the message and releases memory.
-    public func destroy() { natsMsg_Destroy(ptr) }
-
-    public init(ptr: OpaquePointer) {
-        self.ptr = ptr
     }
 }

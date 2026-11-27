@@ -125,7 +125,7 @@ extension NATSConnectionHandle {
             natsConnection_Request(&msgPtr, ptr, subject, buf.baseAddress, Int32(buf.count), timeout)
         }
         if status == NATS_OK, let msgPtr = msgPtr {
-            return NATSMsgHandle(ptr: msgPtr)
+            return NATSMsgHandle(takingOwnershipOf: msgPtr)
         } else {
             let errStr = String(cString: natsStatus_GetText(status))
             throw NATSError.publishFailed("Request failed: \(errStr)")
