@@ -15,8 +15,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-log", from: "1.1.0"),
         .package(url: "https://github.com/apple/swift-metrics", from: "2.5.0"),
-        .package(url: "https://github.com/swift-server/swift-service-lifecycle", from: "2.1.0"),
-        .package(url: "https://github.com/apple/swift-crypto", from: "2.4.0")
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle", from: "2.1.0")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -65,8 +64,7 @@ let package = Package(
             dependencies: [
                 "CNATS",
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "Metrics", package: "swift-metrics"),
-                .product(name: "Crypto", package: "swift-crypto")
+                .product(name: "Metrics", package: "swift-metrics")
             ]
         ),
         // 3. High-level async/await API + ServiceLifecycle

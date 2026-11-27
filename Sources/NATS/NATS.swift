@@ -29,7 +29,7 @@ public final class NATSClient: Service, @unchecked Sendable {
         }
     }
     
-    private func makeOptions() -> NATSOptionsHandle {
+    private func makeOptions() throws -> NATSOptionsHandle {
         let opts = NATSOptionsHandle()
         opts.setURL(configuration.url)
         // Reconnect options
@@ -45,7 +45,7 @@ public final class NATSClient: Service, @unchecked Sendable {
         case .token(let token):
             opts.setToken(token)
         case .nkey(let seed):
-            opts.setNKey(seed: seed)
+            try opts.setNKey(seed: seed)
         case .jwtCredsFile(let file):
             opts.setUserCredentialsFile(file)
         }
@@ -58,7 +58,7 @@ public final class NATSClient: Service, @unchecked Sendable {
         case .idle, .closed:
             await stateHolder.setState(.connecting)
             do {
-                let opts = makeOptions()
+                let opts = try makeOptions()
                 let conn = NATSConnectionHandle()
                 try conn.connect(options: opts)
                 self.conn = conn
