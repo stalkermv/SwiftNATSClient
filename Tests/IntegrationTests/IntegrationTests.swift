@@ -1,188 +1,129 @@
 import Foundation
-import Testing
+import Logging
 import NATS
 import NATSCore
 import ServiceLifecycle
-import Logging
+import Testing
 
-private enum TestError: Error {
-    case serverExited(Int32)
-    case serverStartupTimedOut
-    case connectionFailed
-    case messageTimedOut
-    case connectionDidNotClose
-}
-
-private struct TestNATSServer {
-    private struct Ports: Decodable {
-        let nats: [URL]
+struct IntegrationTests {
+    @Test
+    func testNATSClientConnectAndShutdown() async throws {
+        try await withClient { client, _ in
+            let state = await client.connectionState
+            #expect(state == .connected)
+        }
     }
 
-    private let process: Process
-    private let directory: URL
-    let port: Int
-    var url: String { "nats://127.0.0.1:\(port)" }
+    @Test
+    func testNATSClientPublishSubscribe() async throws {
+        try await withClient { client, server in
+            let subject = "test.natsclient.pubsub.\(UUID().uuidString)"
+            let messages = client.subscribe(subject: subject)
+            try await expectRoundTrip(on: client, through: server, subject: subject, messages: messages)
+        }
+    }
 
-    static func start(port: Int = -1) async throws -> Self {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    @Test
+    func testReconnectAfterServerRestart() async throws {
+        try await withClient(reconnectWait: 0.25) { client, server in
+            let subject = "test.natsclient.reconnect.\(UUID().uuidString)"
+            let messages = client.subscribe(subject: subject)
+            try await server.waitForSubscription(to: subject)
+            try await server.restart()
+            try await expectRoundTrip(on: client, through: server, subject: subject, messages: messages)
+        }
+    }
 
-        let process = Process()
-        var ready = false
-        defer {
-            if !ready {
-                if process.isRunning {
-                    process.terminate()
-                    process.waitUntilExit()
+    @Test
+    func testReconnectDisabledAfterServerRestart() async throws {
+        try await withClient(reconnect: false) { client, server in
+            try await server.restart()
+            try await waitFor("close the NATS connection with reconnect disabled") {
+                do {
+                    // A reconnecting connection buffers publishes. A closed connection rejects them.
+                    try await client.publish(subject: "test.natsclient.closed", data: Data())
+                    return false
+                } catch NATSError.publishFailed {
+                    return true
                 }
-                try? FileManager.default.removeItem(at: directory)
             }
         }
+    }
 
-        let path = ProcessInfo.processInfo.environment["NATS_SERVER"] ?? "/usr/local/bin/nats-server"
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["-a", "127.0.0.1", "-p", String(port), "--ports_file_dir", directory.path]
-        try process.run()
+    private func expectRoundTrip(
+        on client: NATSClient,
+        through server: NATSTestServer,
+        subject: String,
+        messages: AsyncCancelOnGracefulShutdownSequence<AsyncStream<NATSMessage>>
+    ) async throws {
+        let payload = Data("hello highlevel".utf8)
+        try await server.waitForSubscription(to: subject)
+        try await client.publish(subject: subject, data: payload)
 
-        for _ in 0..<100 {
-            guard process.isRunning else { throw TestError.serverExited(process.terminationStatus) }
+        let message = try await withDeadline("receive message on \(subject)") {
+            var iterator = messages.makeAsyncIterator()
+            return await iterator.next()
+        }
+        let received = try #require(message)
+        #expect(received.subject == subject)
+        #expect(received.data == payload)
+    }
 
-            // Only this process writes a ports file in this directory, after binding its listener.
-            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            if let file = files.first(where: { $0.pathExtension == "ports" }),
-               let data = try? Data(contentsOf: file),
-               let ports = try? JSONDecoder().decode(Ports.self, from: data),
-               let listenPort = ports.nats.first?.port {
-                ready = true
-                return Self(process: process, directory: directory, port: listenPort)
+    private func withClient(
+        reconnect: Bool = true,
+        reconnectWait: TimeInterval = 2,
+        _ body: (NATSClient, NATSTestServer) async throws -> Void
+    ) async throws {
+        try await NATSTestServer.withRunningServer { server in
+            let logger = Logger(label: "NATSClientTests")
+            let client = NATSClient(
+                configuration: .init(
+                    url: server.clientURL.absoluteString,
+                    reconnect: reconnect,
+                    reconnectWait: reconnectWait,
+                    auth: .userPassword(user: NATSTestServer.user, password: NATSTestServer.password)
+                ),
+                logger: logger
+            )
+            var configuration = ServiceGroupConfiguration(services: [client], logger: logger)
+            configuration.maximumGracefulShutdownDuration = .seconds(5)
+            configuration.maximumCancellationDuration = .seconds(5)
+            let serviceGroup = ServiceGroup(configuration: configuration)
+
+            try await withThrowingTaskGroup(of: Void.self) { tasks in
+                tasks.addTask { try await serviceGroup.run() }
+
+                try await waitFor("connect to the NATS test server") {
+                    let state = await client.connectionState
+                    if state == .failed || state == .closed {
+                        throw IntegrationTestError.clientConnectionFailed
+                    }
+                    return state == .connected
+                }
+
+                try await body(client, server)
+
+                await serviceGroup.triggerGracefulShutdown()
+                try await tasks.waitForAll()
+                let state = await client.connectionState
+                #expect(state == .closed)
             }
-            try await Task.sleep(for: .milliseconds(50))
         }
-        throw TestError.serverStartupTimedOut
-    }
-
-    func stop() {
-        if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
-        try? FileManager.default.removeItem(at: directory)
     }
 }
 
-private func waitForConnection(_ client: NATSClient) async throws {
-    for _ in 0..<50 {
-        switch await client.connectionState {
-        case .connected: return
-        case .failed, .closed: throw TestError.connectionFailed
-        default: try await Task.sleep(for: .milliseconds(50))
-        }
-    }
-    throw TestError.connectionFailed
-}
-
-private func withConnectedClient(
-    configuration: NATSClientConfiguration,
-    operation: (NATSClient) async throws -> Void
-) async throws {
-    let logger = Logger(label: "NATSClientTests")
-    let client = NATSClient(configuration: configuration, logger: logger)
-    let group = ServiceGroup(configuration: .init(services: [client], logger: logger))
-
-    try await withThrowingTaskGroup(of: Void.self) { tasks in
-        tasks.addTask { try await group.run() }
-        do {
-            try await waitForConnection(client)
-            try await operation(client)
-        } catch {
-            await group.triggerGracefulShutdown()
-            throw error
-        }
-        await group.triggerGracefulShutdown()
-        try await tasks.waitForAll()
-    }
-    #expect(await client.connectionState == .closed)
-}
-
-private func expectRoundTrip(on client: NATSClient, subject: String) async throws {
-    let payload = Data("hello NATS".utf8)
-    let stream = client.subscribe(subject: subject)
-
-    try await withThrowingTaskGroup(of: NATSMessage?.self) { tasks in
+private func withDeadline<Value: Sendable>(
+    _ description: String,
+    operation: @escaping @Sendable () async throws -> Value
+) async throws -> Value {
+    try await withThrowingTaskGroup(of: Value.self) { tasks in
+        tasks.addTask(operation: operation)
         tasks.addTask {
-            for await message in stream { return message }
-            return nil
-        }
-        tasks.addTask {
-            // Subscription registration and server reconnect happen asynchronously.
-            for _ in 0..<100 {
-                try await client.publish(subject: subject, data: payload)
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            throw TestError.messageTimedOut
+            try await Task.sleep(for: .seconds(5))
+            throw IntegrationTestError.timedOut(description)
         }
         defer { tasks.cancelAll() }
-
-        let result = try await tasks.next() ?? nil
-        let message = try #require(result)
-        #expect(message.subject == subject)
-        #expect(message.data == payload)
-    }
-}
-
-@Test
-func testNATSClientConnectAndShutdown() async throws {
-    let server = try await TestNATSServer.start()
-    defer { server.stop() }
-
-    try await withConnectedClient(configuration: .init(url: server.url)) { _ in }
-}
-
-@Test
-func testNATSClientPublishSubscribe() async throws {
-    let server = try await TestNATSServer.start()
-    defer { server.stop() }
-
-    try await withConnectedClient(configuration: .init(url: server.url)) { client in
-        try await expectRoundTrip(on: client, subject: "test.natsclient.pubsub")
-    }
-}
-
-@Test
-func testReconnectAfterServerRestart() async throws {
-    let server = try await TestNATSServer.start()
-    defer { server.stop() }
-
-    let configuration = NATSClientConfiguration(url: server.url, reconnect: true, reconnectWait: 0.25)
-    try await withConnectedClient(configuration: configuration) { client in
-        server.stop()
-        let replacement = try await TestNATSServer.start(port: server.port)
-        defer { replacement.stop() }
-
-        try await expectRoundTrip(on: client, subject: "test.natsclient.reconnect")
-    }
-}
-
-@Test
-func testReconnectDisabledAfterServerRestart() async throws {
-    let server = try await TestNATSServer.start()
-    defer { server.stop() }
-
-    let configuration = NATSClientConfiguration(url: server.url, reconnect: false)
-    try await withConnectedClient(configuration: configuration) { client in
-        server.stop()
-        let replacement = try await TestNATSServer.start(port: server.port)
-        defer { replacement.stop() }
-
-        for _ in 0..<50 {
-            do {
-                // A reconnecting native connection buffers publishes; a closed one rejects them.
-                try await client.publish(subject: "test.natsclient.closed", data: Data())
-            } catch NATSError.publishFailed(_) {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        throw TestError.connectionDidNotClose
+        let result = try await tasks.next()
+        return try #require(result)
     }
 }

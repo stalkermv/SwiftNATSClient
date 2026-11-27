@@ -1,4 +1,4 @@
 module COpenSSL [system] {
-    header "/usr/include/openssl/ssl.h"
+    header "shim.h"
     export *
 }
