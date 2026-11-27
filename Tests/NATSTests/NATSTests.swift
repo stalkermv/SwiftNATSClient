@@ -1,9 +1,3 @@
-import Testing
-import Foundation
-import ServiceLifecycle
-import Logging
-@testable import NATS
+import XCTest
 
-final class NATSTests {
-    
-}
+final class NATSTests: XCTestCase {}

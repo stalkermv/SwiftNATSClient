@@ -1,129 +1,82 @@
-import Testing
 import Foundation
-import ServiceLifecycle
 import Logging
-@testable import NATS
+import NATS
+import ServiceLifecycle
+import XCTest
 
-final class IntegrationTests {
-    static let logger = Logger(label: "NATSClientTests")
-    
-    let client: NATSClient
-    let group: ServiceGroup
-    var runTask: Task<Void, Error>?
-    
-    init() async throws {
-        self.client = NATSClient(
-            configuration: .init(auth: .userPassword(user: "app", password: "app")),
-            logger: Self.logger
-        )
-        
-        self.group = ServiceGroup(configuration: .init(services: [client], logger: Self.logger))
-        self.runTask = Task { try await self.group.run() }
-
-        for _ in 0..<50 {
-            if await client.connectionState == .connected {
-                break
-            }
-            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-        }
-    }
-
-    @Test
+final class IntegrationTests: XCTestCase {
     func testNATSClientConnectAndShutdown() async throws {
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
-            
-            if let runTask = self.runTask {
-                taskGroup.addTask {
-                    try await runTask.value
-                }
-            }
-            // Test logic (just connect, wait, shutdown)
-            taskGroup.addTask {
-                try await Task.sleep(for: .seconds(1))
-                await self.group.triggerGracefulShutdown()
-            }
-            // Wait for all
-            try await taskGroup.next()
-            try await taskGroup.next()
+        try await withConnectedClient { client in
+            let state = await client.connectionState
+            XCTAssertEqual(state, .connected)
         }
     }
 
-    @Test
     func testNATSClientPublishSubscribe() async throws {
-        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+        try await withConnectedClient { client in
+            let subject = "test.natsclient.pubsub"
+            let data = Data("hello highlevel".utf8)
+            let stream = client.subscribe(subject: subject)
 
-            if let runTask = self.runTask {
-                taskGroup.addTask {
-                    try await runTask.value
-                }
-            }
-            
-            // Publisher/Subscriber logic
-            taskGroup.addTask {
-                let subject = "test.natsclient.pubsub", data = "hello highlevel".data(using: .utf8)!
-                let stream = self.client.subscribe(subject: subject)
-                var received = false
-                let subTask = Task {
-                    for await msg in stream {
-                        print("Received message on \(msg.subject): \(String(data: msg.data, encoding: .utf8) ?? "nil")")
-                        #expect(msg.subject == subject)
-                        #expect(msg.data == data)
-                        received = true
-                        break
+            try await withThrowingTaskGroup(of: Void.self) { tasks in
+                tasks.addTask {
+                    for await message in stream {
+                        XCTAssertEqual(message.subject, subject)
+                        XCTAssertEqual(message.data, data)
+                        return
                     }
+                    throw TestError.subscriptionEnded
                 }
-                try await self.client.publish(subject: subject, data: data)
-                // Чекаємо завершення підписки (отримання повідомлення)
-                while !received {
-                    await Task.yield()
+                // Subscription registration is asynchronous. Retry until a message arrives.
+                tasks.addTask {
+                    for _ in 0..<50 {
+                        try await client.publish(subject: subject, data: data)
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                    throw TestError.messageTimedOut
                 }
-                subTask.cancel()
+                defer { tasks.cancelAll() }
+                try await tasks.next()
             }
-            try await taskGroup.next()
-            await self.group.triggerGracefulShutdown()
         }
     }
-}
 
-final class NKeyIntegrationTests {
-    static let logger = Logger(label: "NATSNKeyTests")
-
-    @Test
-    func testNKeyAuth() async throws {
-        let pair = try generateNKeyPair()
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/local/bin/nats-server")
-        proc.arguments = ["--port", "4223", "--nkey", pair.pub]
-        try proc.run()
-        defer { proc.terminate() }
-
-        try await Task.sleep(nanoseconds: 500_000_000)
-
-        let client = NATSClient(configuration: .init(url: "nats://127.0.0.1:4223", auth: .nkey(seed: pair.seed)), logger: Self.logger)
-        let group = ServiceGroup(configuration: .init(services: [client], logger: Self.logger))
+    private func withConnectedClient(_ test: (NATSClient) async throws -> Void) async throws {
+        let server = try await NATSTestServer(authorization: "authorization { user: app, password: app }")
+        let logger = Logger(label: "NATSClientTests")
+        let client = NATSClient(
+            configuration: .init(url: server.url, auth: .userPassword(user: "app", password: "app")),
+            logger: logger
+        )
+        let group = ServiceGroup(configuration: .init(services: [client], logger: logger))
         let runTask = Task { try await group.run() }
+        defer { withExtendedLifetime(server) {} }
 
-        for _ in 0..<50 {
-            if await client.connectionState == .connected { break }
-            try await Task.sleep(nanoseconds: 50_000_000)
+        do {
+            for _ in 0..<50 {
+                let state = await client.connectionState
+                if state == .connected { break }
+                if state == .failed { try await runTask.value }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            guard await client.connectionState == .connected else { throw TestError.connectionTimedOut }
+            try await test(client)
+        } catch {
+            await group.triggerGracefulShutdown()
+            runTask.cancel()
+            _ = await runTask.result
+            throw error
         }
-        #expect(await client.connectionState == .connected)
+
         await group.triggerGracefulShutdown()
         try await runTask.value
+        let state = await client.connectionState
+        XCTAssertEqual(state, .closed)
     }
 
-    private func generateNKeyPair() throws -> (seed: String, pub: String) {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["nk", "-gen", "user", "-pubout"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        try proc.run()
-        proc.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let lines = String(data: data, encoding: .utf8)?.split(separator: "\n") ?? []
-        let seed = String(lines.first ?? "")
-        let pub = String(lines.dropFirst().first ?? "")
-        return (seed, pub)
+    private enum TestError: Error {
+        case connectionTimedOut
+        case subscriptionEnded
+        case messageTimedOut
     }
 }

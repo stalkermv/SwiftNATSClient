@@ -100,7 +100,16 @@ jobs:
           COMMAND_OVERRIDE_NIGHTLY_NEXT: "swift test ${{ inputs.linux_nightly_next_arguments_override }}"
           COMMAND_OVERRIDE_NIGHTLY_MAIN: "swift test ${{ inputs.linux_nightly_main_arguments_override }}"
         run: |
-          apt-get -qq update && apt-get -qq -y install curl && apt-get -y install libsasl2-dev libssl-dev
+          apt-get -qq update
+          apt-get -qq -y install curl libsasl2-dev libssl-dev
+          server_archive=nats-server-v2.11.8-linux-amd64
+          download_dir=$(mktemp -d)
+          trap 'rm -rf "$download_dir"' EXIT
+          curl -fsSL "https://github.com/nats-io/nats-server/releases/download/v2.11.8/${server_archive}.tar.gz" \
+            -o "$download_dir/server.tar.gz"
+          echo "397a6deffb5533e160de0cca322bc3dcaec7fb7282d66a3dfa87a9c183152ad1  $download_dir/server.tar.gz" | sha256sum -c -
+          tar -xzf "$download_dir/server.tar.gz" -C "$download_dir"
+          install "$download_dir/$server_archive/nats-server" /usr/local/bin/nats-server
           curl -s https://raw.githubusercontent.com/apple/swift-nio/main/scripts/check-matrix-job.sh | bash
     container:
       image: ${{ matrix.swift.image }}

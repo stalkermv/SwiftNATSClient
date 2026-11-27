@@ -83,7 +83,12 @@ let package = Package(
         ),
         .testTarget(
             name: "IntegrationTests",
-            dependencies: ["NATS"]
+            dependencies: [
+                "NATS",
+                "NATSCore",
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle")
+            ]
         ),
     ]
 )
