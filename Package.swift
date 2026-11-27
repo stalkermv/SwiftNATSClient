@@ -79,7 +79,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NATSTests",
-            dependencies: ["NATS"]
+            dependencies: ["NATS", "NATSCore"]
         ),
         .testTarget(
             name: "IntegrationTests",

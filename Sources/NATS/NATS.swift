@@ -29,13 +29,13 @@ public final class NATSClient: Service, @unchecked Sendable {
         }
     }
     
-    private func makeOptions() -> NATSOptionsHandle {
+    private func makeOptions() throws -> NATSOptionsHandle {
         let opts = NATSOptionsHandle()
         opts.setURL(configuration.url)
+        opts.setAllowReconnect(configuration.reconnect)
         if configuration.reconnect {
-            opts.setAllowReconnect(true)
             opts.setMaxReconnects(configuration.maxReconnects)
-            opts.setReconnectWait(configuration.reconnectWait)
+            try opts.setReconnectWait(configuration.reconnectWait)
         }
         // Auth
         switch configuration.auth {
@@ -60,7 +60,7 @@ public final class NATSClient: Service, @unchecked Sendable {
         case .idle, .closed:
             await stateHolder.setState(.connecting)
             do {
-                let opts = makeOptions()
+                let opts = try makeOptions()
                 let conn = NATSConnectionHandle()
                 try conn.connect(options: opts)
                 self.conn = conn

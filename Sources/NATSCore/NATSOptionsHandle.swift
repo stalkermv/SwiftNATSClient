@@ -61,8 +61,26 @@ public final class NATSOptionsHandle {
         natsOptions_SetMaxReconnect(ptr, Int32(max))
     }
 
-    public func setReconnectWait(_ seconds: TimeInterval) {
-        let ms = Int64(seconds * 1000)
-        natsOptions_SetReconnectWait(ptr, ms)
+    /// Sets the delay between reconnect attempts, in seconds. Fractional milliseconds are truncated.
+    /// - Throws: `NATSError.connectionFailed` if the delay is invalid or the native setter rejects it.
+    public func setReconnectWait(_ seconds: TimeInterval) throws {
+        let delay = try NATSReconnectDelay(seconds)
+        let status = natsOptions_SetReconnectWait(ptr, delay.milliseconds)
+        guard status == NATS_OK else {
+            let reason = String(cString: natsStatus_GetText(status))
+            throw NATSError.connectionFailed("Could not set reconnect wait: \(reason)")
+        }
+    }
+}
+
+private struct NATSReconnectDelay {
+    let milliseconds: Int64
+
+    init(_ seconds: TimeInterval) throws {
+        guard seconds >= 0,
+              let milliseconds = Int64(exactly: (seconds * 1_000).rounded(.towardZero)) else {
+            throw NATSError.connectionFailed("Reconnect wait must be finite, nonnegative, and fit in Int64 milliseconds")
+        }
+        self.milliseconds = milliseconds
     }
 }

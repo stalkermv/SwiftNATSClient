@@ -19,6 +19,7 @@ public struct NATSClientConfiguration: Sendable {
     public let url: String
     public let reconnect: Bool
     public let maxReconnects: Int
+    /// Delay in seconds between reconnect attempts. When reconnect is enabled, `run()` rejects invalid delays.
     public let reconnectWait: TimeInterval
     public let auth: NATSAuthMode
     
