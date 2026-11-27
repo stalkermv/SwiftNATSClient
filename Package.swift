@@ -51,6 +51,7 @@ let package = Package(
                 .headerSearchPath("nats.c/src"),
                 .define("NATS_BUILD_STREAMING", to: "OFF"),
                 .define("NATS_DISABLE_LIBUV", to: "ON"),
+                .define("_GNU_SOURCE", .when(platforms: [.linux])),
             ],
             linkerSettings: [
                 .linkedLibrary("ssl"),
