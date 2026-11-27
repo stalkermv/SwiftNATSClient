@@ -5,6 +5,9 @@ repository=$(cd "$(dirname "$0")/.." && pwd -P)
 revision=$(git -C "$repository" rev-parse HEAD)
 consumer_directory=$(mktemp -d)
 trap 'rm -rf "$consumer_directory"' EXIT
+consumer_repository="$consumer_directory/SwiftNATSClient.git"
+# SwiftPM expects a repository layout it can clone, including when invoked from a linked worktree.
+git clone --quiet --bare "$repository" "$consumer_repository"
 mkdir "$consumer_directory/Sources"
 
 cat > "$consumer_directory/Package.swift" <<'SWIFT'
@@ -43,5 +46,5 @@ precondition(state == .idle)
 print("NATS consumer linked and initialized successfully")
 SWIFT
 
-SWIFTNATS_SMOKE_REPOSITORY="$repository" SWIFTNATS_SMOKE_REVISION="$revision" \
+SWIFTNATS_SMOKE_REPOSITORY="$consumer_repository" SWIFTNATS_SMOKE_REVISION="$revision" \
     swift run --package-path "$consumer_directory" --configuration release NATSConsumer

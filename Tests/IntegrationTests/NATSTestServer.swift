@@ -32,6 +32,7 @@ actor NATSTestServer {
 
     static func withRunningServer(
         authorization: Authorization = .userPassword,
+        isolation: isolated (any Actor)? = #isolation,
         _ body: (NATSTestServer) async throws -> Void
     ) async throws {
         let server = Self(broker: try await launch(authorization: authorization), authorization: authorization)
