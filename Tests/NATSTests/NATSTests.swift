@@ -4,6 +4,24 @@ import NATSCore
 import NATS
 
 struct NATSTests {
+    @Test(arguments: [Int.min, Int.max].filter { Int32(exactly: $0) == nil })
+    func reportsOutOfRangeMaxReconnectsWhenClientStarts(maxReconnects: Int) async {
+        let client = NATSClient(configuration: .init(maxReconnects: maxReconnects))
+
+        await #expect {
+            try await client.run()
+        } throws: { error in
+            guard case NATSError.connectionFailed(let reason) = error else { return false }
+            return reason.hasPrefix("Max reconnects")
+        }
+        #expect(await client.connectionState == .failed)
+    }
+
+    @Test(arguments: [Int(Int32.min), -1, 0, Int(Int32.max)])
+    func acceptsInRangeMaxReconnects(maxReconnects: Int) throws {
+        try NATSOptionsHandle().setMaxReconnects(maxReconnects)
+    }
+
     @Test
     func reportsInvalidReconnectWaitWhenClientStarts() async {
         let client = NATSClient(configuration: .init(reconnectWait: .nan))

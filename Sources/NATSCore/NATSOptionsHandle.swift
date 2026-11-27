@@ -57,8 +57,17 @@ public final class NATSOptionsHandle {
         natsOptions_SetAllowReconnect(ptr, allow)
     }
 
-    public func setMaxReconnects(_ max: Int) {
-        natsOptions_SetMaxReconnect(ptr, Int32(max))
+    /// Sets the maximum reconnect count accepted by the native client.
+    /// - Throws: `NATSError.connectionFailed` if the count is out of range or the native setter rejects it.
+    public func setMaxReconnects(_ max: Int) throws {
+        guard let count = Int32(exactly: max) else {
+            throw NATSError.connectionFailed("Max reconnects must fit in a 32-bit signed integer")
+        }
+        let status = natsOptions_SetMaxReconnect(ptr, count)
+        guard status == NATS_OK else {
+            let reason = String(cString: natsStatus_GetText(status))
+            throw NATSError.connectionFailed("Could not set max reconnects: \(reason)")
+        }
     }
 
     /// Sets the delay between reconnect attempts, in seconds. Fractional milliseconds are truncated.

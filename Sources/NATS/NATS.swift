@@ -34,7 +34,7 @@ public final class NATSClient: Service, @unchecked Sendable {
         opts.setURL(configuration.url)
         opts.setAllowReconnect(configuration.reconnect)
         if configuration.reconnect {
-            opts.setMaxReconnects(configuration.maxReconnects)
+            try opts.setMaxReconnects(configuration.maxReconnects)
             try opts.setReconnectWait(configuration.reconnectWait)
         }
         // Auth
