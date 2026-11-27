@@ -47,16 +47,12 @@ let package = Package(
             sources: ["shim.c", "nats.c/src"],
             publicHeadersPath: "include",
             cSettings: [
-                .headerSearchPath("nats.c/include"),
                 .headerSearchPath("nats.c/src"),
-                .define("NATS_BUILD_STREAMING", to: "OFF"),
-                .define("NATS_DISABLE_LIBUV", to: "ON"),
+                // Match the TLS defaults in nats.c's CMake build.
+                .define("NATS_HAS_TLS"),
+                .define("NATS_USE_OPENSSL_1_1"),
+                .define("NATS_FORCE_HOST_VERIFICATION"),
                 .define("_GNU_SOURCE", .when(platforms: [.linux])),
-            ],
-            linkerSettings: [
-                .linkedLibrary("ssl"),
-                .linkedLibrary("crypto"),
-                .linkedLibrary("z")
             ]
         ),
         // 2. Low-level Swift wrapper
@@ -80,7 +76,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NATSTests",
-            dependencies: ["NATS"]
+            dependencies: ["NATS", "NATSCore"]
         ),
         .testTarget(
             name: "IntegrationTests",
@@ -88,7 +84,7 @@ let package = Package(
                 "NATS",
                 "NATSCore",
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle")
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
             ]
         ),
     ]
