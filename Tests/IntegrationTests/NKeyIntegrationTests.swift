@@ -1,73 +1,83 @@
-import Foundation
 import NATS
 import NATSCore
-import XCTest
+import Testing
 
-final class NKeyIntegrationTests: XCTestCase {
+struct NKeyIntegrationTests {
     // Public test vector from RFC 8032, section 7.1, encoded in NKey format.
     private let seed = "SUAJ2YNRTXX72WTAXKCEV5ES5QWMIRCJYVUXWMTJDFYDXLADDSXH6YALCA"
     private let publicKey = "UDLVVGABQKYQVN6VJP7NHSLEA45A5YLS6PNKMIZFV4BBU2HXA5IRUVAL"
 
+    @Test
     func testUserSeedAuthenticatesAndSurvivesReconnect() async throws {
-        let authorization = "authorization { users: [{ nkey: \(publicKey) }] }"
-        let server = try await NATSTestServer(authorization: authorization)
-        let url = server.url
-        let port = try XCTUnwrap(URL(string: url)?.port)
+        try await NATSTestServer.withRunningServer(authorization: .nkey(publicKey)) { server in
+            let url = server.clientURL.absoluteString
+            let anonymousOptions = NATSOptionsHandle()
+            anonymousOptions.setURL(url)
+            #expect(throws: NATSError.self) {
+                try NATSConnectionHandle().connect(options: anonymousOptions)
+            }
 
-        let anonymousOptions = NATSOptionsHandle()
-        anonymousOptions.setURL(url)
-        XCTAssertThrowsError(try NATSConnectionHandle().connect(options: anonymousOptions))
+            let connection = NATSConnectionHandle()
+            do {
+                let options = NATSOptionsHandle()
+                options.setURL(url)
+                try options.setNKey(seed: seed)
+                try connection.connect(options: options)
+            }
+            #expect(connection.isConnected)
 
-        let connection = NATSConnectionHandle()
-        do {
-            let options = NATSOptionsHandle()
-            options.setURL(url)
-            try options.setNKey(seed: seed)
-            try connection.connect(options: options)
+            try await server.stop()
+            try await waitFor("observe NKey connection loss") { !connection.isConnected }
+            try await server.restart()
+            try await waitFor("reconnect with the retained NKey seed") { connection.isConnected }
         }
-        XCTAssertTrue(connection.isConnected)
-
-        try await server.stop()
-        for _ in 0..<100 where connection.isConnected {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        XCTAssertFalse(connection.isConnected)
-
-        let restartedServer = try await NATSTestServer(authorization: authorization, port: port)
-        defer { withExtendedLifetime(restartedServer) {} }
-        for _ in 0..<100 where !connection.isConnected {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        XCTAssertTrue(connection.isConnected)
     }
 
-    func testInvalidSeedFailsBeforeConnectingToAnonymousServer() async throws {
-        let server = try await NATSTestServer()
-        defer { withExtendedLifetime(server) {} }
-        let corruptedSeed = String(seed.dropLast()) + "E"
-        let accountSeed = "SAAJ2YNRTXX72WTAXKCEV5ES5QWMIRCJYVUXWMTJDFYDXLADDSXH6YHY3Q"
+    @Test
+    func testPublicClientAuthenticatesWithUserSeed() async throws {
+        try await NATSTestServer.withRunningServer(authorization: .nkey(publicKey)) { server in
+            let url = server.clientURL.absoluteString
+            let client = NATSClient(configuration: .init(url: url, auth: .nkey(seed: seed)))
 
-        for invalidSeed in ["", corruptedSeed, accountSeed, seed + "\0suffix"] {
-            let client = NATSClient(configuration: .init(url: server.url, auth: .nkey(seed: invalidSeed)))
-            let task = Task { try await client.run() }
-            defer { task.cancel() }
-            for _ in 0..<50 {
-                let state = await client.connectionState
-                if state == .failed || state == .connected { break }
-                try await Task.sleep(for: .milliseconds(50))
-            }
-
-            let state = await client.connectionState
-            guard state == .failed else {
+            try await withThrowingTaskGroup(of: Void.self) { tasks in
+                tasks.addTask { try await client.run() }
+                try await waitFor("authenticate the NATS client using its NKey seed") {
+                    let state = await client.connectionState
+                    if state == .failed { throw IntegrationTestError.clientConnectionFailed }
+                    return state == .connected
+                }
                 await client.shutdown()
-                XCTFail("Invalid seed must fail before connecting")
-                continue
+                try await tasks.waitForAll()
             }
-            do {
-                try await task.value
-                XCTFail("Invalid seed must propagate an error")
-            } catch NATSError.connectionFailed(let message) {
-                XCTAssertEqual(message, "Invalid NKey user seed")
+            #expect(await client.connectionState == .closed)
+        }
+    }
+
+    @Test
+    func testInvalidSeedFailsBeforeConnectingToAnonymousServer() async throws {
+        try await NATSTestServer.withRunningServer(authorization: .anonymous) { server in
+            let url = server.clientURL.absoluteString
+            let corruptedSeed = String(seed.dropLast()) + "E"
+            let accountSeed = "SAAJ2YNRTXX72WTAXKCEV5ES5QWMIRCJYVUXWMTJDFYDXLADDSXH6YHY3Q"
+
+            for invalidSeed in ["", corruptedSeed, accountSeed, seed + "\0suffix"] {
+                let client = NATSClient(configuration: .init(url: url, auth: .nkey(seed: invalidSeed)))
+
+                await #expect {
+                    try await withThrowingTaskGroup(of: Void.self) { tasks in
+                        tasks.addTask { try await client.run() }
+                        try await waitFor("resolve invalid NKey authorization") {
+                            let state = await client.connectionState
+                            return state == .failed || state == .connected
+                        }
+                        if await client.connectionState == .connected { await client.shutdown() }
+                        try await tasks.waitForAll()
+                    }
+                } throws: { error in
+                    guard case NATSError.connectionFailed(let reason) = error else { return false }
+                    return reason == "Invalid NKey user seed"
+                }
+                #expect(await client.connectionState == .failed)
             }
         }
     }
