@@ -1,16 +1,112 @@
-name: Main
+name: CI
 
 on:
+  pull_request:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NATS_SERVER_VERSION: 2.11.8
+
 jobs:
-  unit-tests:
-    name: Unit tests
-    uses: ./.github/workflows/unit_tests.yml
-    with:
-      linux_5_10_arguments_override: "--explicit-target-dependency-import-check error"
-      linux_6_0_arguments_override: "--explicit-target-dependency-import-check error"
-      linux_6_1_arguments_override: "--explicit-target-dependency-import-check error"
-      linux_nightly_next_arguments_override: "--explicit-target-dependency-import-check error"
-      linux_nightly_main_arguments_override: "--explicit-target-dependency-import-check error"
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            nats_platform: linux-amd64
+            nats_sha256: 397a6deffb5533e160de0cca322bc3dcaec7fb7282d66a3dfa87a9c183152ad1
+          - os: xcode-27
+            nats_platform: darwin-arm64
+            nats_sha256: 23e0c5354c2da385708946a21900c944fcb9a3bbfd02aae27a4ae750dea0b682
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          brew install openssl@3 pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Install Swift on Linux
+        if: runner.os == 'Linux'
+        run: |
+          version=$(cat .swift-version)
+          release="swift-$version-RELEASE"
+          archive="$release-ubuntu24.04.tar.gz"
+          url="https://download.swift.org/swift-$version-release/ubuntu2404/$release/$archive"
+          # Digest of the Swift 6.4.1 archive, verified against the Swift 6.x release key.
+          archive_sha256=7d246c7114077ad01dba4ad897628446ada4c489d6c7dbcf39ae3f25cbe17e8b
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 --output "$archive" "$url"
+          printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum --check --strict
+          tar -xzf "$archive"
+          rm "$archive"
+          echo "$RUNNER_TEMP/$release-ubuntu24.04/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Install Swift on macOS
+        if: runner.os == 'macOS'
+        run: |
+          version=$(cat .swift-version)
+          release="swift-$version-RELEASE"
+          installer="$RUNNER_TEMP/$release-osx.pkg"
+          url="https://download.swift.org/swift-$version-release/xcode/$release/$release-osx.pkg"
+          curl -fsSL --retry 3 --output "$installer" "$url"
+          pkgutil --check-signature "$installer"
+          sudo /usr/sbin/installer -pkg "$installer" -target /
+          rm "$installer"
+          echo "/Library/Developer/Toolchains/$release.xctoolchain/usr/bin" >> "$GITHUB_PATH"
+          echo "DEVELOPER_DIR=/Applications/Xcode_27.app/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Install nats-server
+        env:
+          NATS_PLATFORM: ${{ matrix.nats_platform }}
+          NATS_SHA256: ${{ matrix.nats_sha256 }}
+        run: |
+          nats_release="nats-server-v$NATS_SERVER_VERSION-$NATS_PLATFORM"
+          bin_dir="$RUNNER_TEMP/nats-bin"
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 --output "$nats_release.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/v$NATS_SERVER_VERSION/$nats_release.tar.gz"
+          printf '%s  %s\n' "$NATS_SHA256" "$nats_release.tar.gz" | shasum -a 256 --check
+          mkdir -p "$bin_dir"
+          tar -xzf "$nats_release.tar.gz" -C "$bin_dir" --strip-components=1 "$nats_release/nats-server"
+          echo "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain and broker versions
+        run: |
+          swift --version | grep -F "Swift version $(cat .swift-version) "
+          nats-server -v | grep -Fx "nats-server: v$NATS_SERVER_VERSION"
+          pkg-config --modversion openssl
+
+      - name: Run debug tests
+        run: swift test --configuration debug
+
+      - name: Run release tests
+        run: swift test --configuration release
+
+      - name: Build a package that depends on SwiftNATSClient
+        run: bash Scripts/smoke-consumer.sh

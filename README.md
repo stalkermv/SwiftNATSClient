@@ -89,15 +89,30 @@ This package depends on [the `nats.c` library](https://github.com/nats-io/nats.c
 
 ### Dependencies
 
-`nats.c` depends on `openssl`, so `libssl-dev` must be present at build time. On macOS, you can install it via Homebrew:
+The build uses OpenSSL 3 and discovers it through `pkg-config`.
 
 ```bash
-brew install openssl@3
+# Debian and Ubuntu
+sudo apt-get install libssl-dev pkg-config
+
+# macOS
+brew install openssl@3 pkgconf
+export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 ```
 
 ## Development Setup
 
-You can use Docker or run tests locally. For Linux CI, see `.github/workflows/`.
+Use the Swift toolchain pinned in `.swift-version`. If you use Swiftly, install it with `swiftly install 6.4.1`.
+
+```bash
+git submodule update --init --recursive
+swift test
+swift test -c release
+```
+
+The integration tests launch their own broker. They look for `nats-server` on `PATH` or use the binary specified by `NATS_SERVER_PATH`. CI uses NATS Server 2.11.8. On macOS, `brew install nats-server` provides a broker for local testing.
+
+Run `bash Scripts/smoke-consumer.sh` to build and run a temporary SwiftPM executable that imports `NATS` from the current Git revision.
 
 ## License
 
