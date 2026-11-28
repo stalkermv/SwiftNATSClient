@@ -7,6 +7,7 @@ import Foundation
 // MARK: - NATSConnectionHandle
 public final class NATSConnectionHandle {
     var ptr: OpaquePointer?
+    private var nKeyCredentials: NATSNKeyCredentials?
     
     public init() { self.ptr = nil }
     
@@ -14,10 +15,13 @@ public final class NATSConnectionHandle {
     
     /// Connects to the NATS server using the provided options.
     public func connect(options: NATSOptionsHandle) throws {
+        let nKeyCredentials = options.nKeyCredentials
         var c: OpaquePointer? = nil
         let status = natsConnection_Connect(&c, options.ptr)
         if status == NATS_OK {
+            if let ptr { natsConnection_Destroy(ptr) }
             self.ptr = c
+            self.nKeyCredentials = nKeyCredentials
         } else {
             let errStr = String(cString: natsStatus_GetText(status))
             throw NATSError.connectionFailed(errStr)

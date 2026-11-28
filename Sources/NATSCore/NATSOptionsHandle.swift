@@ -12,6 +12,7 @@ import Foundation
 public final class NATSOptionsHandle {
     
     var ptr: OpaquePointer?
+    private(set) var nKeyCredentials: NATSNKeyCredentials?
     
     public init() {
         natsOptions_Create(&ptr)
@@ -48,7 +49,7 @@ public final class NATSOptionsHandle {
     public func setToken(_ token: String) {
         natsOptions_SetToken(ptr, token)
     }
-    
+
     public func setUserCredentialsFile(_ file: String) {
         natsOptions_SetUserCredentialsFromFiles(ptr, file, nil)
     }
@@ -79,6 +80,35 @@ public final class NATSOptionsHandle {
             let reason = String(cString: natsStatus_GetText(status))
             throw NATSError.connectionFailed("Could not set reconnect wait: \(reason)")
         }
+    }
+
+    /// Configure NKey authentication using an encoded user seed.
+    public func setNKey(seed: String) throws {
+        nKeyCredentials = try NATSNKeyCredentials(seed: seed, options: ptr)
+    }
+}
+
+/// The C connection clones options and borrows the signing context on reconnect.
+final class NATSNKeyCredentials {
+    private let seed: UnsafeMutablePointer<CChar>
+
+    init(seed: String, options: OpaquePointer?) throws {
+        guard !seed.utf8.contains(0) else {
+            throw NATSError.connectionFailed("Invalid NKey user seed")
+        }
+        var ownedSeed: UnsafeMutablePointer<CChar>?
+        let status = swiftNATS_SetUserNKey(options, seed, &ownedSeed)
+        guard status == NATS_OK, let ownedSeed else {
+            let message = status == NATS_INVALID_ARG
+                ? "Invalid NKey user seed"
+                : "Unable to configure NKey authentication: \(String(cString: natsStatus_GetText(status)))"
+            throw NATSError.connectionFailed(message)
+        }
+        self.seed = ownedSeed
+    }
+
+    deinit {
+        swiftNATS_DestroyNKeySeed(seed)
     }
 }
 

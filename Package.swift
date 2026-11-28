@@ -52,6 +52,7 @@ let package = Package(
                 .define("NATS_HAS_TLS"),
                 .define("NATS_USE_OPENSSL_1_1"),
                 .define("NATS_FORCE_HOST_VERIFICATION"),
+                .define("_GNU_SOURCE", .when(platforms: [.linux])),
             ]
         ),
         // 2. Low-level Swift wrapper

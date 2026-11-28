@@ -83,6 +83,8 @@ let config = NATSClientConfiguration(auth: .token("mytoken"))
 let config = NATSClientConfiguration(auth: .jwtCredsFile(file: "/path/to/user.creds"))
 ```
 
+For a standalone NKey user seed, use `.nkey(seed:)`.
+
 ## CNATS
 
 This package depends on [the `nats.c` library](https://github.com/nats-io/nats.c), included as a submodule.

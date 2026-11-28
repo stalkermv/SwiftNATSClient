@@ -1,4 +1,4 @@
 module CNATS [system] {
-    header "../nats.c/src/nats.h"
+    header "shim.h"
     export *
-} 
+}
