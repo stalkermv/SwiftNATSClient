@@ -15,11 +15,12 @@ public final class NATSClient: Service, Sendable {
     /// Runs the client until graceful shutdown or cancellation.
     public func run() async throws {
         let (stop, signalStop) = AsyncStream<Void>.makeStream()
-        try await withTaskCancellationOrGracefulShutdownHandler {
-            try await lifecycle.run(until: stop)
-        } onCancelOrGracefulShutdown: {
-            signalStop.finish()
-        }
+        let finish: @Sendable () -> Void = { signalStop.finish() }
+        try await withGracefulShutdownHandler(operation: {
+            try await withTaskCancellationHandler(operation: {
+                try await lifecycle.run(until: stop)
+            }, onCancel: finish)
+        }, onGracefulShutdown: finish)
     }
 
     /// Triggers graceful shutdown and waits until the connection is closed.
